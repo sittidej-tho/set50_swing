@@ -37,12 +37,25 @@ CACHE_CSV = DATA_DIR / "prices.csv"
 def _to_long(df: pd.DataFrame) -> pd.DataFrame:
     """Convert yfinance multi-ticker frame -> tidy long format."""
     if isinstance(df.columns, pd.MultiIndex):
-        df = df.stack(level=1, future_stack=True).rename_axis(["Date", "Ticker"]).reset_index()
+        # yfinance >=1.x uses (Ticker, Price) ordering; <1.x used (Price, Ticker).
+        # Stack the Ticker level (whichever level does NOT contain price-type labels).
+        price_cols = {"open", "high", "low", "close", "volume"}
+        lv = 0 if {str(v).lower() for v in df.columns.get_level_values(1)} & price_cols else 1
+        df = df.stack(level=lv, future_stack=True).rename_axis(["Date", "Ticker"]).reset_index()
     else:
         df = df.reset_index().assign(Ticker=df.columns.name or "UNKNOWN")
-    df.columns = [str(c).strip() for c in df.columns]
+    # Normalise to Title Case to handle yfinance versions that return lowercase.
+    df.columns = [
+        c.strip().title() if c.strip().lower() in
+        ("open", "high", "low", "close", "volume", "date", "ticker")
+        else c.strip()
+        for c in df.columns
+    ]
     keep = ["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]
-    df = df[[c for c in keep if c in df.columns]].dropna(subset=["Close"])
+    df = df[[c for c in keep if c in df.columns]]
+    if "Close" not in df.columns:
+        return pd.DataFrame(columns=keep)
+    df = df.dropna(subset=["Close"])
     df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
     return df.sort_values(["Ticker", "Date"]).reset_index(drop=True)
 

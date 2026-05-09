@@ -31,7 +31,7 @@ SET50_TICKERS: list[str] = [
     "BTS.BK", "CBG.BK", "CENTEL.BK", "COM7.BK", "CPALL.BK",
     "CPF.BK", "CPN.BK", "CRC.BK", "DELTA.BK", "EA.BK",
     "EGCO.BK", "GLOBAL.BK", "GPSC.BK", "GULF.BK", "HMPRO.BK",
-    "INTUCH.BK", "IVL.BK", "KBANK.BK", "KKP.BK", "KTB.BK",
+    "IVL.BK", "KBANK.BK", "KKP.BK", "KTB.BK",
     "KTC.BK", "LH.BK", "MINT.BK", "MTC.BK", "OR.BK",
     "OSP.BK", "PTT.BK", "PTTEP.BK", "PTTGC.BK", "RATCH.BK",
     "SAWAD.BK", "SCB.BK", "SCC.BK", "SCGP.BK", "TIDLOR.BK",

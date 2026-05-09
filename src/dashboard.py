@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from .config import REPORTS_DIR
+from .config import DATA_DIR, REPORTS_DIR
 from .strategy import Signal
 
 
@@ -40,16 +40,48 @@ def _signal_to_dict(s: Signal) -> dict:
 
 
 def render(signals: Iterable[Signal], out_path: Path | None = None) -> Path:
+    weekly_dir = DATA_DIR / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+
     sigs = [_signal_to_dict(s) for s in signals]
+    as_of = dt.date.today().strftime("%Y-%m-%d")
+    generated_at = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
     actions_summary: dict[str, int] = {}
     for s in sigs:
         actions_summary[s["action"]] = actions_summary.get(s["action"], 0) + 1
 
+    # Persist snapshot without sparklines to keep file size small.
+    snapshot = {
+        "as_of": as_of,
+        "generated_at": generated_at,
+        "summary": actions_summary,
+        "signals": [{k: v for k, v in s.items() if k != "history"} for s in sigs],
+    }
+    (weekly_dir / f"{as_of}.json").write_text(
+        json.dumps(snapshot, default=str), encoding="utf-8"
+    )
+
+    # Load all historical weeks.
+    all_data: dict[str, dict] = {}
+    for f in sorted(weekly_dir.glob("*.json")):
+        try:
+            week = json.loads(f.read_text(encoding="utf-8"))
+            all_data[week["as_of"]] = week
+        except Exception:
+            pass
+    # Current week overrides with full sparkline data.
+    all_data[as_of] = {
+        "as_of": as_of,
+        "generated_at": generated_at,
+        "summary": actions_summary,
+        "signals": sigs,
+    }
+
     payload = {
-        "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "as_of":        dt.date.today().strftime("%Y-%m-%d"),
-        "summary":      actions_summary,
-        "signals":      sigs,
+        "current": as_of,
+        "weeks":   sorted(all_data.keys(), reverse=True),
+        "data":    all_data,
     }
 
     out_path = out_path or (REPORTS_DIR / "dashboard.html")
@@ -141,6 +173,8 @@ details.guide[open] summary::after{transform:rotate(180deg)}
 .guide-card .trigger{font-size:11px;color:var(--muted);margin-top:6px;
   font-family:ui-monospace,Menlo,Consolas,monospace}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(3,1fr)}}
+#week-sel{background:var(--panel2);border:1px solid var(--accent);color:var(--accent);
+  padding:7px 10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600}
 .view-toggle{display:flex;gap:4px;border:1px solid var(--line);border-radius:8px;padding:2px;background:var(--panel2)}
 .view-toggle button{background:transparent;border:none;color:var(--muted);padding:5px 10px;
   border-radius:6px;cursor:pointer;font-size:13px}
@@ -271,6 +305,7 @@ details.guide[open] summary::after{transform:rotate(180deg)}
         <option value="action">Action</option>
       </select>
     </label>
+    <select id="week-sel"></select>
     <div class="view-toggle">
       <button id="vt-table" class="active" title="Table view">☰ Table</button>
       <button id="vt-grid" title="Grid view">⊞ Grid</button>
@@ -290,21 +325,49 @@ const PAYLOAD = __PAYLOAD__;
 const fmt = (x, d=2) => (x===null||x===undefined||isNaN(x))?"–":Number(x).toFixed(d);
 const pct = (x, d=1) => (x===null||x===undefined||isNaN(x))?"–":Number(x).toFixed(d)+"%";
 
-document.getElementById('meta').textContent =
-  `As of ${PAYLOAD.as_of} · generated ${PAYLOAD.generated_at} · ${PAYLOAD.signals.length} names scored`;
+// ---------- Week state ----------
+let curWeek = PAYLOAD.current;
+function weekData(){ return PAYLOAD.data[curWeek]; }
+
+// ---------- Week selector ----------
+const $weekSel = document.getElementById('week-sel');
+for(const w of PAYLOAD.weeks){
+  const opt = document.createElement('option');
+  opt.value = w;
+  opt.textContent = w === PAYLOAD.current ? `${w}  (latest)` : w;
+  opt.selected = (w === curWeek);
+  $weekSel.appendChild(opt);
+}
+$weekSel.addEventListener('change', e=>{
+  curWeek = e.target.value;
+  renderMeta(); renderKPIs(); rerender();
+});
+
+// ---------- Meta ----------
+function renderMeta(){
+  const wd = weekData();
+  document.getElementById('meta').textContent =
+    `As of ${wd.as_of} · generated ${wd.generated_at} · ${wd.signals.length} names scored`;
+}
+renderMeta();
 
 // ---------- KPI cards ----------
 const order = [["BUY-STRONG","Buy","buy"],["BUY-DIP","Buy the Dip","buy"],
                ["HOLD","Hold","hold"],["TRIM","Trim","trim"],
                ["CUT","Cut","cut"],["SELL-STRONG","Sell","sell"]];
 const kpiHost = document.getElementById('kpis');
-for(const [k,label,css] of order){
-  const v = PAYLOAD.summary[k] || 0;
-  const el = document.createElement('div');
-  el.className = `kpi ${css}`;
-  el.innerHTML = `<div class="label">${label}</div><div class="val">${v}</div>`;
-  kpiHost.appendChild(el);
+function renderKPIs(){
+  const summary = weekData().summary;
+  kpiHost.innerHTML = '';
+  for(const [k,label,css] of order){
+    const v = summary[k] || 0;
+    const el = document.createElement('div');
+    el.className = `kpi ${css}`;
+    el.innerHTML = `<div class="label">${label}</div><div class="val">${v}</div>`;
+    kpiHost.appendChild(el);
+  }
 }
+renderKPIs();
 
 // ---------- Card rendering ----------
 const host = document.getElementById('cards');
@@ -371,10 +434,10 @@ function sortSignals(arr, mode){
   return a;
 }
 
-function renderCards(filterAction, filterText, sortMode){
+function renderCards(signals, filterAction, filterText, sortMode){
   host.innerHTML = "";
   const q = (filterText||"").trim().toUpperCase();
-  const sorted = sortSignals(PAYLOAD.signals, sortMode);
+  const sorted = sortSignals(signals, sortMode);
   const visible = [];
   for(const s of sorted){
     if(filterAction && filterAction!=="ALL" && s.action!==filterAction) continue;
@@ -417,10 +480,10 @@ function fvalHTML(v){
   return `<span class="fval ${css}">${v>=0?'+':''}${fmt(v,0)}</span>`;
 }
 
-function renderTable(filterAction, filterText, sortMode){
+function renderTable(signals, filterAction, filterText, sortMode){
   const tblWrap = document.getElementById('tbl-wrap');
   const q = (filterText||'').trim().toUpperCase();
-  const sorted = sortSignals(PAYLOAD.signals, sortMode);
+  const sorted = sortSignals(signals, sortMode);
   const rows = sorted.filter(s=>{
     if(filterAction && filterAction!=='ALL' && s.action!==filterAction) return false;
     if(q && !s.ticker.toUpperCase().includes(q)) return false;
@@ -467,8 +530,9 @@ const $cards  = document.getElementById('cards');
 const $tblWrap= document.getElementById('tbl-wrap');
 
 function rerender(){
-  if(curView==='table') renderTable(curAction, $search.value, curSort);
-  else                  renderCards(curAction, $search.value, curSort);
+  const sigs = weekData().signals;
+  if(curView==='table') renderTable(sigs, curAction, $search.value, curSort);
+  else                  renderCards(sigs, curAction, $search.value, curSort);
 }
 
 document.querySelectorAll('.toolbar button[data-f]').forEach(btn=>{

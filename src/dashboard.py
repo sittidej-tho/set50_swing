@@ -137,7 +137,8 @@ header .meta{color:var(--muted);font-size:13px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
   padding:14px 16px;display:flex;flex-direction:column;gap:10px}
 .card .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.card .ticker{font-size:18px;font-weight:600}
+.card .ticker{font-size:18px;font-weight:600;color:var(--txt);text-decoration:none}
+.card .ticker:hover{color:var(--accent);text-decoration:underline}
 .card .price{font-size:14px;color:var(--muted)}
 .badge{padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;letter-spacing:.3px}
 .badge.buy{background:rgba(34,197,94,.15);color:var(--buy);border:1px solid rgba(34,197,94,.4)}
@@ -404,7 +405,7 @@ function cardHTML(s){
     <div class="card" data-action="${s.action}" data-ticker="${s.ticker}">
       <div class="row">
         <div>
-          <div class="ticker">${s.ticker.replace('.BK','')}</div>
+          <a class="ticker" href="https://www.tradingview.com/chart/?symbol=SET:${s.ticker.replace('.BK','')}" target="_blank" rel="noopener">${s.ticker.replace('.BK','')}</a>
           <div class="price">${fmt(s.price)} THB</div>
         </div>
         <div class="badge ${s.css}">${s.label}</div>

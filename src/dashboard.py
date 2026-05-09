@@ -141,6 +141,31 @@ details.guide[open] summary::after{transform:rotate(180deg)}
 .guide-card .trigger{font-size:11px;color:var(--muted);margin-top:6px;
   font-family:ui-monospace,Menlo,Consolas,monospace}
 @media (max-width:900px){.kpis{grid-template-columns:repeat(3,1fr)}}
+.view-toggle{display:flex;gap:4px;border:1px solid var(--line);border-radius:8px;padding:2px;background:var(--panel2)}
+.view-toggle button{background:transparent;border:none;color:var(--muted);padding:5px 10px;
+  border-radius:6px;cursor:pointer;font-size:13px}
+.view-toggle button.active{background:var(--accent);color:#0b1020;font-weight:600}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+.sig-table{width:100%;border-collapse:collapse;font-size:13px}
+.sig-table th{background:var(--panel2);color:var(--muted);font-size:11px;text-transform:uppercase;
+  letter-spacing:.5px;padding:10px 12px;text-align:left;position:sticky;top:0;z-index:1;
+  border-bottom:1px solid var(--line)}
+.sig-table td{padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.sig-table tr:last-child td{border-bottom:none}
+.sig-table tr:hover td{background:var(--panel2)}
+.sig-table td.ticker-col{font-weight:600;font-size:14px;border-left:3px solid}
+.sig-table tr.row-buy   td.ticker-col{border-color:var(--buy)}
+.sig-table tr.row-hold  td.ticker-col{border-color:var(--hold)}
+.sig-table tr.row-trim  td.ticker-col{border-color:var(--trim)}
+.sig-table tr.row-cut   td.ticker-col{border-color:var(--cut)}
+.sig-table tr.row-sell  td.ticker-col{border-color:var(--sell)}
+.sig-table td.num{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.sig-table td.num b{color:var(--txt)}
+.sig-table td.rat{max-width:300px;white-space:normal;font-size:11px;color:var(--muted)}
+.fval{font-weight:600}
+.fval.pos{color:var(--buy)} .fval.neg{color:var(--cut)} .fval.neu{color:var(--hold)}
+.ticker-col a{color:inherit;text-decoration:none;cursor:pointer}
+.ticker-col a:hover{text-decoration:underline;color:var(--accent)}
 </style>
 </head>
 <body>
@@ -246,9 +271,14 @@ details.guide[open] summary::after{transform:rotate(180deg)}
         <option value="action">Action</option>
       </select>
     </label>
+    <div class="view-toggle">
+      <button id="vt-table" class="active" title="Table view">☰ Table</button>
+      <button id="vt-grid" title="Grid view">⊞ Grid</button>
+    </div>
   </div>
 
-  <div class="cards" id="cards"></div>
+  <div id="tbl-wrap" class="tbl-wrap"></div>
+  <div class="cards" id="cards" style="display:none"></div>
   <div class="legend">
     Composite score ∈ [-100, +100]. Stop / Target are ATR-based reference levels
     (2× / 3.5× ATR). This is a research tool — not investment advice.
@@ -381,17 +411,69 @@ function renderCards(filterAction, filterText, sortMode){
   }
 }
 
+// ---------- Table rendering ----------
+function fvalHTML(v){
+  const css = v>20?'pos':v<-20?'neg':'neu';
+  return `<span class="fval ${css}">${v>=0?'+':''}${fmt(v,0)}</span>`;
+}
+
+function renderTable(filterAction, filterText, sortMode){
+  const tblWrap = document.getElementById('tbl-wrap');
+  const q = (filterText||'').trim().toUpperCase();
+  const sorted = sortSignals(PAYLOAD.signals, sortMode);
+  const rows = sorted.filter(s=>{
+    if(filterAction && filterAction!=='ALL' && s.action!==filterAction) return false;
+    if(q && !s.ticker.toUpperCase().includes(q)) return false;
+    return true;
+  });
+  const thead = `<thead><tr>
+    <th>Ticker</th><th>Action</th><th>Score</th>
+    <th>Price</th><th>Stop</th><th>Target</th>
+    <th>Trend</th><th>Mom</th><th>MR</th><th>RS</th><th>Vol</th>
+    <th>RSI</th><th>%B</th><th>Ret5d</th><th>Ret20d</th>
+    <th class="rat">Rationale</th>
+  </tr></thead>`;
+  const tbody = rows.map(s=>{
+    const f = s.factors; const ss = s.snapshot||{};
+    return `<tr class="row-${s.css}">
+      <td class="ticker-col"><a href="https://www.tradingview.com/chart/?symbol=SET:${s.ticker.replace('.BK','')}" target="_blank" rel="noopener">${s.ticker.replace('.BK','')}</a></td>
+      <td><span class="badge ${s.css}">${s.label}</span></td>
+      <td class="num"><b>${s.score>=0?'+':''}${fmt(s.score,0)}</b></td>
+      <td class="num"><b>${fmt(s.price)}</b></td>
+      <td class="num">${fmt(s.stop)}</td>
+      <td class="num">${fmt(s.target)}</td>
+      <td class="num">${fvalHTML(f.trend)}</td>
+      <td class="num">${fvalHTML(f.momentum)}</td>
+      <td class="num">${fvalHTML(f.mean_reversion)}</td>
+      <td class="num">${fvalHTML(f.relative_str)}</td>
+      <td class="num">${fvalHTML(f.volume)}</td>
+      <td class="num">${fmt(ss.RSI,0)}</td>
+      <td class="num">${fmt(ss['%B'],2)}</td>
+      <td class="num">${pct(ss.Ret_5d,1)}</td>
+      <td class="num">${pct(ss.Ret_20d,1)}</td>
+      <td class="rat">${s.rationale}</td>
+    </tr>`;
+  }).join('');
+  tblWrap.innerHTML = `<table class="sig-table">${thead}<tbody>${tbody}</tbody></table>`;
+}
+
 // ---------- Toolbar wiring ----------
 let curAction = "ALL";
 let curSort   = "name_asc";
+let curView   = "table";
 const $search = document.getElementById('search');
 const $sort   = document.getElementById('sort');
+const $cards  = document.getElementById('cards');
+const $tblWrap= document.getElementById('tbl-wrap');
 
-function rerender(){ renderCards(curAction, $search.value, curSort); }
+function rerender(){
+  if(curView==='table') renderTable(curAction, $search.value, curSort);
+  else                  renderCards(curAction, $search.value, curSort);
+}
 
-document.querySelectorAll('.toolbar button').forEach(btn=>{
+document.querySelectorAll('.toolbar button[data-f]').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    document.querySelectorAll('.toolbar button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.toolbar button[data-f]').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     curAction = btn.dataset.f;
     rerender();
@@ -399,6 +481,24 @@ document.querySelectorAll('.toolbar button').forEach(btn=>{
 });
 $search.addEventListener('input', rerender);
 $sort.addEventListener('change', e=>{ curSort = e.target.value; rerender(); });
+
+document.getElementById('vt-table').addEventListener('click', ()=>{
+  curView='table';
+  document.getElementById('vt-table').classList.add('active');
+  document.getElementById('vt-grid').classList.remove('active');
+  $tblWrap.style.display='';
+  $cards.style.display='none';
+  rerender();
+});
+document.getElementById('vt-grid').addEventListener('click', ()=>{
+  curView='grid';
+  document.getElementById('vt-grid').classList.add('active');
+  document.getElementById('vt-table').classList.remove('active');
+  $tblWrap.style.display='none';
+  $cards.style.display='grid';
+  rerender();
+});
+
 
 rerender();
 </script>
